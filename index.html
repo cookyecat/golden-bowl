@@ -98,6 +98,8 @@
   #map-row{display:flex;align-items:center;gap:10px;margin:0 0 10px}
   #map-row label{font-size:12.5px;color:var(--sub);font-weight:700}
   #map-row select{flex:1;min-width:0}
+  #map-info{margin:-4px 0 12px;font-size:12.5px;color:var(--sub);font-weight:600;line-height:1.45}
+  #map-info .mi-blurb{color:var(--ink);font-weight:700;margin-bottom:2px}
   #seed-row{display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap}
   #seed-row label{font-size:12.5px;color:var(--sub);font-weight:700}
   #seed-input{width:130px;font-family:ui-monospace,Menlo,Consolas,monospace;background:#0f151b;color:var(--ink);border:1px solid #34424f;border-radius:8px;padding:6px 10px}
@@ -306,6 +308,7 @@
       <select id="map-select"><option value="random">🎲 Random maze</option></select>
       <button id="map-edit-btn" type="button" class="secondary" title="Draw your own maze, or tweak the random one">🗺 Map editor</button>
     </div>
+    <div id="map-info"></div>
     <div id="seed-row">
       <label for="seed-input">Maze seed</label>
       <input id="seed-input" type="text" inputmode="numeric" autocomplete="off" placeholder="random">
@@ -7160,7 +7163,8 @@ class CameraRig {
 class Game {
   constructor(config) {
     this.config = config; // [{slot, species, name, control}] length 4
-    this.customMap = config.customMap || null;       // a map from the editor; null = a fresh random maze each round
+    this.rotation = !!config.mapRotation;            // 'all built-in maps': a different one every round
+    this.customMap = this.rotation ? nextBuiltin(null) : (config.customMap || null);       // a built-in or editor map; null = a fresh random maze each round
     this.state = 'playing';
     this.elapsed = 0;
     this.seed = Number.isFinite(config.seed) ? config.seed : (Math.random() * 1e9) | 0;
@@ -7358,10 +7362,11 @@ class Game {
     this.labelsVisible = this.labelsVisible !== false;
     layer.classList.toggle('off', !this.labelsVisible);
 
-    $('seed-label').textContent = this.customMap ? 'map: ' + this.customMap.name : 'seed ' + this.seed;
-    $('seed-label').title = this.customMap ? 'A map made in the editor' : 'Type this into Maze seed on the setup screen to replay this maze';
-    $('replay-btn').classList.toggle('hidden', !!this.customMap);                 // a custom map is always replayed as is
-    $('again-btn').textContent = this.customMap ? 'Play again' : 'New maze';
+    $('seed-label').textContent = this.customMap ? (this.customMap.icon ? this.customMap.icon + ' ' : 'map: ') + this.customMap.name : 'seed ' + this.seed;
+    $('seed-label').title = this.customMap ? (this.customMap.builtin ? 'A built-in map' : 'A map made in the editor') : 'Type this into Maze seed on the setup screen to replay this maze';
+    $('replay-btn').classList.toggle('hidden', !!this.customMap && !this.rotation);        // a fixed map is always replayed as is
+    $('replay-btn').textContent = this.customMap ? 'Replay this map' : 'Replay this maze';
+    $('again-btn').textContent = this.rotation ? 'Next map' : this.customMap ? 'Play again' : 'New maze';
     $('finish-btn').onclick = () => { if (this.state === 'playing') this.endRound(); };
     $('again-btn').onclick = () => this.newRound(false);
     $('replay-btn').onclick = () => this.newRound(true);
@@ -7551,6 +7556,7 @@ class Game {
     this.bowl.group.traverse(o => { if (o.material) o.material.dispose(); });
     this.scene.remove(this.bowl.group);
     if (!sameSeed) this.seed = (Math.random() * 1e9) | 0;      // 'Replay this maze' keeps the seed
+    if (!sameSeed && this.rotation) this.customMap = nextBuiltin(this.customMap && this.customMap.builtin);
     this.state = 'playing';
     this.anyFatal = false;
     this.elapsed = 0;
@@ -7673,6 +7679,302 @@ function analyzeMap(m) {
   if (unreachable.length) warnings.push(unreachable.length + ' open tile' + (unreachable.length === 1 ? '' : 's') + ' can never be reached (shown red). Use “Fill unreachable”.');
   return { errors, warnings, open, pathLen, path, unreachable, deadEnds };
 }
+
+
+// ============================================================
+// Built-in maps: hand-designed layouts that ship with the game. '#' wall, '.' floor, S start, B bowl.
+// Each is 27 x 27 (the editable area); the outer wall is added by parseBuiltin.
+// ============================================================
+const BUILTIN_MAPS = [
+  { id: "meadow", name: "Pillar Meadow", icon: "🌾", level: 1, blurb: "A wide-open field of scattered pillars. The bowl hides in a hut whose only door faces away from the start.",
+    rows: [
+      '...........................',
+      '.S.........................',
+      '..#...#...#...#...#...#...#',
+      '...........................',
+      '...........................',
+      '.......##..................',
+      '..#.#.#...#...#.###...#...#',
+      '.......##.....#............',
+      '..#........................',
+      '....................##.....',
+      '..#...#...#...#...#..##...#',
+      '...........................',
+      '...........................',
+      '...........................',
+      '..#...#..##...#...#...#...#',
+      '........##.................',
+      '..#........................',
+      '.................#######...',
+      '..#...#...#...#..#.....#..#',
+      '........#........#.....#...',
+      '.................#..B......',
+      '.................#.....#...',
+      '..#...#..##...#..#.....#..#',
+      '.................#######...',
+      '...........................',
+      '...........................',
+      '..#...#...#...#...#...#...#'
+    ] },
+  { id: "courts", name: "Four Courtyards", icon: "🏰", level: 2, blurb: "Four open courtyards full of pillars, joined by narrow passages around a central plaza. Great for long-sighted pigs.",
+    rows: [
+      '###########################',
+      '#S.......#########........#',
+      '#........#########........#',
+      '#..#..#..#########..#..#..#',
+      '#.........................#',
+      '#.....#..####.####.....#..#',
+      '#...#....####.####...#....#',
+      '#......#.####.####......#.#',
+      '#........####.####........#',
+      '###.#####.........#####.###',
+      '###.#####.........#####.###',
+      '###.#####..#...#..#####.###',
+      '###.#####.........#####.###',
+      '###.#####.........#####.###',
+      '###.#####.........#####.###',
+      '###.#####..#...#..#####.###',
+      '###.#####.........#####.###',
+      '###.#####.........#####.###',
+      '#........####.####........#',
+      '#........####.####........#',
+      '#..#..#..####.####..#..#..#',
+      '#........####.####........#',
+      '#.....#................#..#',
+      '#...#....#########...#....#',
+      '#......#.#########......#.#',
+      '#........#########.......B#',
+      '###########################'
+    ] },
+  { id: "dungeon", name: "Dungeon Rooms", icon: "🗝", level: 2, blurb: "Nine pillared rooms joined by narrow doorways. Which door leads to the bowl?",
+    rows: [
+      'S.......#.........#........',
+      '....#.........#........#...',
+      '.#......#..#......#.#......',
+      '........#.........#........',
+      '.....#..#......#..#.....#..',
+      '..#.....#...#.....#..#.....',
+      '........#.........#........',
+      '........#.........#........',
+      '##############.############',
+      '........#.........#........',
+      '...........................',
+      '....#...#.....#...#....#...',
+      '.#......#..#......#.#......',
+      '........#.........#........',
+      '.....#..#......#..#.....#..',
+      '..#.....#...#.....#..#.....',
+      '........#.........#........',
+      '........#.........#........',
+      '#####.#####.############.##',
+      '........#.........#........',
+      '....#...#.....#...#....#...',
+      '.#.........#........#......',
+      '........#.........#........',
+      '.....#..#......#..#.....#..',
+      '..#.....#...#.....#..#.....',
+      '........#.........#........',
+      'B.......#.........#........'
+    ] },
+  { id: "rings", name: "Garden Rings", icon: "🌿", level: 2, blurb: "Concentric hedge rings, each with a door on a different side. The bowl is in the middle.",
+    rows: [
+      'S..........................',
+      '.##################..#####.',
+      '.#.......................#.',
+      '.#.#####################.#.',
+      '.#.#...................#.#.',
+      '.#.#.#################.#.#.',
+      '.#.#.#...............#.#.#.',
+      '.#.#.#.#############.#...#.',
+      '.#.#.#.#...........#.#...#.',
+      '.#.#.#.#.#..######.#.#.#.#.',
+      '.#.#.#.#.#.......#.#.#.#.#.',
+      '.#.#.#.#.#.#####.#.#.#.#.#.',
+      '.#.#.#.#.#.#.....#...#.#.#.',
+      '.#.#.#.#.#.#.B...#.#.#.#.#.',
+      '.#.#.#.#.#.#...#.#.#.#.#.#.',
+      '.#.#.#...#.#####.#.#.#.#.#.',
+      '.#.#.#...#.......#.#.#.#.#.',
+      '.#.#.#.#.#########.#.#.#.#.',
+      '.#.#.#.#...........#.#.#.#.',
+      '.#.#.#.#############.#.#.#.',
+      '.#...#...............#.#.#.',
+      '.#.#.##..#############.#.#.',
+      '.#.#...................#.#.',
+      '.#.#####################.#.',
+      '.#.......................#.',
+      '.#########################.',
+      '...........................'
+    ] },
+  { id: "hedge", name: "Hedge Maze", icon: "🌳", level: 2, blurb: "The classic: a medium-size hedge maze with plenty of dead ends.",
+    rows: [
+      '###########################',
+      '#S..#.#.......#...#.......#',
+      '###.#.#.#.###.#.#.###.###.#',
+      '#...#...#...#...#.#...#...#',
+      '#.###.#####.#####.#.#.#.###',
+      '#.#.......#.....#...#.....#',
+      '#.#######.#.###.###.#.###.#',
+      '#.#.......#...#.....#.....#',
+      '#.#.#####.#########.#.###.#',
+      '#.#...#...#.........#...#.#',
+      '#.###.#.###.#########.#.#.#',
+      '#.....#.....#.........#...#',
+      '###########.#.#####.###.#.#',
+      '#.......#.....#...#.#...#.#',
+      '#.###.#.#.#####.#.###.###.#',
+      '#...#.#.#.#.....#...#.#...#',
+      '#.#.#.###.#.#.#.###.#.#.###',
+      '#.#.#...#.#.#.#.#.....#...#',
+      '#.#.###.#.###.#.#.#######.#',
+      '#.#...#.#...#.#.#.#.#.....#',
+      '#.#.###.###.#.#.#.#.#.#####',
+      '#...#...#...#.#.....#.#...#',
+      '#.###.###.###.#.#####.#.#.#',
+      '#...#.#...#...#.......#...#',
+      '###.#.#.#####.###########.#',
+      '#B..#.....................#',
+      '###########################'
+    ] },
+  { id: "twin", name: "Twin Peaks", icon: "⛰", level: 3, blurb: "A mirror-symmetric maze: start at the bottom, bowl at the top. Both sides are equally tricky.",
+    rows: [
+      '###########################',
+      '#............B............#',
+      '#############.#############',
+      '#.....#.....#.#.....#.....#',
+      '#.###.#.###.#.#.###.#.###.#',
+      '#.#.#.#.#.........#.#.#.#.#',
+      '#.#.#.###.###.###.###.#.#.#',
+      '#.#.#...#...#.#...#...#.#.#',
+      '#.#.###.#.#.###.#.#.###.#.#',
+      '#.#.....#.#.....#.#.....#.#',
+      '#.#.#####.#.#.#.#.#####.#.#',
+      '#.#.#.......#.#.......#.#.#',
+      '#.#.###.###########.###.#.#',
+      '#.#...#...#.....#...#...#.#',
+      '#.###.###.###.###.###.###.#',
+      '#.#.....#.#.....#.#.....#.#',
+      '#.#####.#.#.###.#.#.#####.#',
+      '#.#...#...#.....#...#...#.#',
+      '#.#.#.#####.#.#.#####.#.#.#',
+      '#...#.#.....#.#.....#.#...#',
+      '#.###.###.#.###.#.###.###.#',
+      '#.#...#...#.....#...#...#.#',
+      '#.#.#.#.#.#######.#.#.#.#.#',
+      '#.#.#.#.#...#.#...#.#.#.#.#',
+      '#.#.###.###.#.#.###.###.#.#',
+      '#.#.......#..S..#.......#.#',
+      '###########################'
+    ] },
+  { id: "halls", name: "Serpentine Halls", icon: "🐍", level: 3, blurb: "Nine long halls linked at alternating ends. Follow the snake, or find the shortcuts.",
+    rows: [
+      '#S........................#',
+      '#.........................#',
+      '#######################..##',
+      '#.........................#',
+      '#.........................#',
+      '##..########.##############',
+      '#.........................#',
+      '#.........................#',
+      '#######################..##',
+      '#.........................#',
+      '#.........................#',
+      '##..#######################',
+      '#.........................#',
+      '#.........................#',
+      '########.##############..##',
+      '#.........................#',
+      '#.........................#',
+      '##..#######################',
+      '#.........................#',
+      '#.........................#',
+      '##################.####..##',
+      '#.........................#',
+      '#.........................#',
+      '##..#######################',
+      '#.........................#',
+      '#........................B#',
+      '###########################'
+    ] },
+  { id: "snail", name: "Snail Shell", icon: "🐌", level: 3, blurb: "One long spiral corridor winding into the centre, with a few cracks in the walls for the brave.",
+    rows: [
+      'S..........................',
+      '##########################.',
+      '.........................#.',
+      '.####.##################.#.',
+      '.#.....................#.#.',
+      '.#.#########.#########...#.',
+      '.#.#.................#.#.#.',
+      '.#.#.###############.#.#.#.',
+      '.#.#.#.............#.#.#.#.',
+      '.#.#.#.###########.#.#.#.#.',
+      '.#.#.#.#.........#.#.#.#.#.',
+      '.#.#.#...#######.#.#.#.#.#.',
+      '.#.#.#.#.#.....#.#.#.#.#.#.',
+      '.#.#.#.#.#.###.#.#.#.#.#.#.',
+      '.#.#.#.#.#.#B..#.#.#.#.#.#.',
+      '.#.#...#.#.#####.#.#.#.#.#.',
+      '.#.#.#.#.#.......#.#.#.#.#.',
+      '.#.#.#.#.#########.#.#.#.#.',
+      '.#.#.#.#...........#.#.#.#.',
+      '.#.#.#.#############.#.#.#.',
+      '.#.#.#...............#.#.#.',
+      '.#.#.#################.#.#.',
+      '.#.#...................#.#.',
+      '.#.#####################.#.',
+      '.#.......................#.',
+      '.#########################.',
+      '...........................'
+    ] },
+  { id: "catacombs", name: "Catacombs", icon: "🦇", level: 4, blurb: "A deep, winding underground maze with a very long way to the bowl. Bring a good memory.",
+    rows: [
+      '###########################',
+      '#S#.................#.....#',
+      '#.#.#######.#######.#.###.#',
+      '#.#...#...#.....#...#...#.#',
+      '#.#####.#.#.###.#.#.#####.#',
+      '#.......#.#.#...#.#.......#',
+      '#########.###.###.#.#######',
+      '#.#.....#...#.#.#...#.....#',
+      '#.#.###.###.#.#.#.#.#.###.#',
+      '#.#.#...#...#.#...#.#.#.#.#',
+      '#.#.#.###.###.#.###.#.#.#.#',
+      '#...#...#.#...#...#.....#.#',
+      '#.#####.#.#.#####.#######.#',
+      '#.#.....#...#...#.#.......#',
+      '#.#.###.#####.###.#.#####.#',
+      '#.#.#...#.......#...#...#.#',
+      '#.#.#.###.#####.#####.#.#.#',
+      '#.#.#...#.#.#...#.....#.#.#',
+      '#.#.#####.#.#.#.#.#####.#.#',
+      '#.#.#.......#.#.#.#.....#.#',
+      '#.#.#.#######.#.#.#.###.#.#',
+      '#.#...#.#.....#.#.#...#.#.#',
+      '#.#####.#.#######.###.#.#.#',
+      '#.......#.#.....#.#...#.#.#',
+      '#######.#.#.###.#.#.#####.#',
+      '#B......#.....#...#.......#',
+      '###########################'
+    ] }
+];
+function parseBuiltin(def) {
+  const tiles = new Uint8Array(GRID * GRID).fill(TILE.WALL);
+  let spawn = null, bowl = null;
+  def.rows.forEach((row, y) => { for (let x = 0; x < ED_N; x++) {
+    const c = row[x];
+    if (c !== '#') tiles[tileIndex(x + BORDER, y + BORDER)] = TILE.EMPTY;
+    if (c === 'S') spawn = [x + BORDER, y + BORDER];
+    if (c === 'B') bowl = [x + BORDER, y + BORDER];
+  } });
+  return { name: def.name, tiles, spawn, bowl, builtin: def.id, icon: def.icon, level: def.level, blurb: def.blurb };
+}
+const builtinById = id => { const d = BUILTIN_MAPS.find(m => m.id === id); return d ? parseBuiltin(d) : null; };
+// The next map when the player chose "all built-in maps": random, but never the same one twice in a row.
+function nextBuiltin(currentId) {
+  const pool = BUILTIN_MAPS.filter(m => m.id !== currentId);
+  return parseBuiltin(pool[Math.floor(Math.random() * pool.length)]);
+}
+const levelDots = n => '●'.repeat(n) + '○'.repeat(4 - n);
 
 class MapEditor {
   constructor() {
@@ -8109,21 +8411,45 @@ function initSetupScreen() {
   { const first = rows.findIndex((r, i) => isLlm(i)); if (first >= 0) cards[first].setCollapsed(false); }
 
   // ---- map choice: a fresh random maze (with an optional seed), a saved map, or the one just made in the editor
-  let activeMap = null;
+  let activeMap = null, rotate = false;
   const editor = new MapEditor();
   const mapSel = $('map-select');
   const refreshMapSelect = () => {
     mapSel.innerHTML = '';
-    mapSel.append(new Option('🎲 Random maze', 'random'));
-    if (activeMap) mapSel.append(new Option('🗺 ' + activeMap.name + (activeMap.unsaved ? ' (not saved)' : ''), 'active'));
-    for (const m of loadSavedMaps()) if (!activeMap || m.name !== activeMap.name) mapSel.append(new Option('💾 ' + m.name, 'saved:' + m.name));
-    mapSel.value = activeMap ? 'active' : 'random';
-    $('seed-row').classList.toggle('hidden', !!activeMap);
+    mapSel.append(new Option('🎲 Random maze (new every round)', 'random'));
+    mapSel.append(new Option('🎰 All built-in maps, one after another', 'rotate'));
+    const gb = document.createElement('optgroup'); gb.label = 'Built-in maps';
+    for (const d of BUILTIN_MAPS) gb.append(new Option(d.icon + ' ' + d.name + '  ' + levelDots(d.level), 'builtin:' + d.id));
+    mapSel.append(gb);
+    const mine = loadSavedMaps(), custom = activeMap && !activeMap.builtin ? activeMap : null;
+    if (custom || mine.length) {
+      const gm = document.createElement('optgroup'); gm.label = 'Your maps';
+      if (custom) gm.append(new Option('🗺 ' + custom.name + (custom.unsaved ? ' (not saved)' : ''), 'active'));
+      for (const m of mine) if (!custom || m.name !== custom.name) gm.append(new Option('💾 ' + m.name, 'saved:' + m.name));
+      mapSel.append(gm);
+    }
+    mapSel.value = rotate ? 'rotate' : activeMap ? (activeMap.builtin ? 'builtin:' + activeMap.builtin : 'active') : 'random';
+    $('seed-row').classList.toggle('hidden', !!activeMap || rotate);
+    refreshMapInfo();
   };
-  const useMap = m => { m.unsaved = !loadSavedMaps().some(s => s.name === m.name && s.code === mapToCode(m)); activeMap = m; refreshMapSelect(); $('setup-error').textContent = ''; };
+  const refreshMapInfo = () => {
+    const box = $('map-info');
+    if (rotate) { box.textContent = 'Every round is played on a different built-in map, picked at random. Press “Next map” after a round to move on.'; return; }
+    if (!activeMap) { box.textContent = 'A brand-new random maze every round. Type a seed below to replay one.'; return; }
+    const a = analyzeMap(activeMap);
+    const bits = [];
+    if (activeMap.builtin) bits.push('difficulty ' + levelDots(activeMap.level));
+    bits.push(a.open + ' open tiles', 'bowl ' + a.pathLen + ' steps away by the shortest route');
+    box.textContent = '';
+    if (activeMap.blurb) box.append(el('div', 'mi-blurb', activeMap.blurb));
+    box.append(el('div', 'mi-stats', bits.join(' · ')));
+  };
+  const useMap = m => { m.unsaved = !loadSavedMaps().some(s => s.name === m.name && s.code === mapToCode(m)); activeMap = m; rotate = false; refreshMapSelect(); $('setup-error').textContent = ''; };
   mapSel.addEventListener('change', () => {
     const v = mapSel.value;
-    if (v === 'random') activeMap = null;
+    rotate = v === 'rotate';
+    if (v === 'random' || rotate) activeMap = null;
+    else if (v.startsWith('builtin:')) activeMap = builtinById(v.slice(8));
     else if (v.startsWith('saved:')) {
       const saved = loadSavedMaps().find(m => m.name === v.slice(6));
       const r = saved && codeToMap(saved.code, saved.name);
@@ -8132,7 +8458,7 @@ function initSetupScreen() {
     refreshMapSelect();
   });
   $('map-edit-btn').addEventListener('click', () => {
-    let start = activeMap;
+    let start = activeMap && activeMap.builtin ? { ...cloneMap(activeMap), name: activeMap.name + ' copy' } : activeMap;   // a built-in map is never overwritten: you edit a copy
     if (!start) {                                   // edit the maze you are about to play (same seed = same maze)
       const t = $('seed-input').value.trim(), seed = /^\d{1,12}$/.test(t) ? Number(t) : (Math.random() * 1e9) | 0;
       start = mapFromLayout(generateLayout(seed), '');
@@ -8164,6 +8490,7 @@ function initSetupScreen() {
     const seedText = activeMap ? '' : $('seed-input').value.trim();
     if (seedText && !/^\d{1,12}$/.test(seedText)) { $('setup-error').textContent = 'Maze seed must be a whole number, or left blank for a random maze.'; return; }
     config.seed = seedText ? Number(seedText) : undefined;
+    config.mapRotation = rotate;
     if (activeMap) { const a = analyzeMap(activeMap); if (a.errors.length) { $('setup-error').textContent = 'The selected map has a problem: ' + a.errors[0]; return; } config.customMap = activeMap; }
     persist();
     $('setup-error').textContent = '';
