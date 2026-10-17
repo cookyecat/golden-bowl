@@ -18,6 +18,14 @@
   h1,h2,.title-font{font-family:'Baloo 2','Nunito',sans-serif;}
   #game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;}
   .hidden{display:none !important;}
+  #bg{position:fixed;inset:0;width:100%;height:100%;display:block;pointer-events:none;opacity:1;transition:opacity .7s ease}
+  #bg.fade{opacity:0}
+  #setup.demo-on{background:radial-gradient(ellipse at 50% 50%, rgba(8,12,17,.66) 0%, rgba(8,12,17,.22) 62%, rgba(8,12,17,.34) 100%)}
+  #demo-cap{position:fixed;left:14px;bottom:14px;z-index:60;display:flex;gap:8px;align-items:flex-start;max-width:min(250px,calc((100vw - 620px) / 2 - 8px));
+    background:rgba(16,22,29,.72);backdrop-filter:blur(6px);border:1px solid #2c3947;border-radius:12px;padding:8px 10px;font-size:12.5px;line-height:1.4;color:var(--sub);font-weight:600}
+  #demo-cap button{padding:3px 8px;font-size:12px;border-radius:8px;background:#26323f;color:var(--ink);flex:none}
+  #demo-title{display:block;color:var(--ink);font-weight:800}
+  #demo-tip:empty{display:none}
   button{font-family:inherit;cursor:pointer;border:none;border-radius:10px;padding:10px 16px;font-weight:800;
     background:var(--gold);color:#2a1d02;font-size:15px;transition:transform .12s ease, filter .12s ease;}
   button:hover{filter:brightness(1.08)}
@@ -247,7 +255,9 @@
 <body>
 
 <canvas id="game"></canvas>
+<canvas id="bg" class="hidden fade" aria-hidden="true"></canvas>
 
+<div id="demo-cap" class="hidden"><button id="demo-toggle" type="button" title="Pause the live preview (saves battery)">⏸</button><div><span id="demo-title"></span><span id="demo-tip"></span></div></div>
 <div id="setup">
   <div id="setup-card">
     <h1>🐾 Golden Bowl</h1>
@@ -7044,6 +7054,7 @@ class CameraRig {
   get yaw() { return this.cur.yaw; }
   get eyeActive() { return this.mode === 'eye' && this.cur.dist < 1.5; }
   bind() {
+    if (this.game.demo) return;                 // the setup-screen preview is not interactive
     const cv = this.canvas;
     cv.addEventListener('contextmenu', e => e.preventDefault());
     cv.addEventListener('pointerdown', e => {
@@ -7169,15 +7180,16 @@ class Game {
     this.elapsed = 0;
     this.seed = Number.isFinite(config.seed) ? config.seed : (Math.random() * 1e9) | 0;
 
-    this.canvas = $('game');
-    this.renderer = new uc({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+    this.demo = !!config.demo;                       // the live preview behind the setup screen: bots only, no HUD, no input, no sound
+    this.canvas = $(this.demo ? 'bg' : 'game');
+    this.renderer = new uc({ canvas: this.canvas, antialias: !this.demo, powerPreference: this.demo ? 'default' : 'high-performance' });
     this.renderer.outputColorSpace = k;
     this.renderer.toneMapping = 4; // ACESFilmic
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = 2; // PCFSoftShadowMap
     this.renderer.setClearColor(0x9fd4e8, 1);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(this.demo ? 1 : Math.min(window.devicePixelRatio || 1, 2));
 
     this.scene = new vt;
     this.camera = new hi(42, window.innerWidth / window.innerHeight, 0.5, 220);
@@ -7186,14 +7198,15 @@ class Game {
     this.setupLighting();
     this.setupComposer();
 
-    this.input = new InputController;
-    this.audio = new AudioEngine;
+    this.input = this.demo ? { keys: new Set(), axis: () => ({ x: 0, z: 0 }) } : new InputController;
+    this.audio = this.demo ? { muted: true, unlock() { }, play() { }, setMuted() { } } : new AudioEngine;
     this.feedBurst = new FeedBurst(this.scene);
     this.selectedHuman = Math.max(0, config.findIndex(s => s.control === 'human'));   // first human (0 if nobody plays)
     this.focusIdx = this.selectedHuman;      // whose view the Follow/Eye camera and the mind map show
 
-    window.addEventListener('resize', () => this.onResize());
-    window.addEventListener('keydown', e => {
+    this._onResize = () => this.onResize();
+    window.addEventListener('resize', this._onResize);
+    if (!this.demo) window.addEventListener('keydown', e => {
       const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA');
       if (typing) return;
       if (e.code.startsWith('Digit')) {
@@ -7217,6 +7230,7 @@ class Game {
     this.startAgents();
     this.last = performance.now();
     this.frame = this.frame.bind(this);
+    if (this.demo) { this.rig.setMode('follow'); this.demoClock = 99; this.demoShotLen = 10; this.demoSide = 1; this.demoShift = 0; this.lastRender = this.last; this.renderedFrames = 0; this.slowSum = 0; }
     requestAnimationFrame(this.frame);
   }
 
@@ -7242,7 +7256,7 @@ class Game {
     let sun = new Si(0xffe7b0, 3.6);
     sun.position.set(GRID * 0.35, GRID * 0.55, GRID * 0.25);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    const sm = this.demo ? 1024 : 2048; sun.shadow.mapSize.set(sm, sm);
     let r = GRID * 0.62;
     sun.shadow.camera.left = -r; sun.shadow.camera.right = r; sun.shadow.camera.top = r; sun.shadow.camera.bottom = -r;
     sun.shadow.camera.near = 1; sun.shadow.camera.far = GRID * 2;
@@ -7312,6 +7326,7 @@ class Game {
     return an.control === 'human' ? 'Human' : 'Bot';
   }
   buildHud() {
+    if (this.demo) return;
     $('setup').classList.add('hidden');
     $('hud').classList.remove('hidden');
     let anyHuman = this.animals.some(a => a.control === 'human');
@@ -7433,6 +7448,7 @@ class Game {
     $('mind-info').textContent = `${mem.count} / ${mem.capacity} tiles${mem.forgottenTotal ? ` · ${mem.forgottenTotal} forgotten` : ''}`;
   }
   updateHud() {
+    if (this.demo) return;
     let m = Math.floor(this.elapsed / 60), s = Math.floor(this.elapsed % 60);
     $('timer').textContent = `${m}:${String(s).padStart(2, '0')}`;
     let fedCount = this.animals.filter(a => a.fed).length;
@@ -7444,6 +7460,7 @@ class Game {
   }
   // Called every rendered frame (cheap: only touches the DOM when something changed).
   updatePanels() {
+    if (this.demo) return;
     for (const agent of this.llmAgents) {
       const p = this.panels.get(agent.animal.id);
       if (!p) continue;
@@ -7462,6 +7479,7 @@ class Game {
   // Float each name tag over its animal. Animals spawn in the same cell, so tags that would sit on top
   // of each other are stacked upward instead of overlapping.
   updateLabels() {
+    if (this.demo) return;
     if (!this.labelsVisible || !this.labels) return;
     const w = window.innerWidth, h = window.innerHeight, LH = 22;
     if (!this._lv) this._lv = new H;
@@ -7522,6 +7540,7 @@ class Game {
   // reached the bowl are listed as DNF instead of the round hanging forever.
   endRound(reason) {
     if (this.state !== 'playing') return;
+    if (this.demo) { this.state = 'ended'; this.demoEndT = 0; return; }
     this.state = 'ended';
     for (const agent of this.llmAgents) agent.stop();      // stop spending tokens on a finished round
     const allFed = this.animals.every(a => a.fed);
@@ -7566,6 +7585,70 @@ class Game {
   }
   startAgents() { for (const agent of this.llmAgents) agent.start(); }
 
+  // ---------- live preview behind the setup screen ----------
+  // Runs the real engine with four bots on the built-in maps. A "director" picks an animal every
+  // ~10 s and slides the picture sideways so the action sits beside the setup card, not behind it.
+  demoFrame(now, dt) {
+    if (document.hidden || !$('editor').classList.contains('hidden')) { this.lastRender = now; return; }
+    this._acc = (this._acc || 0) + dt;
+    if (this._acc < 0.03) return;                       // ~30 frames per second is plenty for a backdrop
+    dt = Math.min(0.05, this._acc); this._acc = 0;
+    // switch itself off on a computer that cannot keep up (warm-up frames ignored)
+    const real = (now - this.lastRender) / 1000; this.lastRender = now;
+    if (++this.renderedFrames > 40 && this.renderedFrames <= 130) {
+      this.slowSum += real;
+      if (this.renderedFrames === 130 && this.slowSum / 90 > 0.07) { if (this.onSlow) this.onSlow(); return; }
+    }
+    this.update(dt);
+    this.demoDirect(dt);
+    this.rig.update(dt);
+    const W = window.innerWidth, H = window.innerHeight, cardHalf = Math.min(300, W / 2 - 16);
+    this.demoShift = damp(this.demoShift, this.demoSide * (W / 2 + cardHalf) / 2, 1.6, dt);
+    this.camera.setViewOffset(W, H, -this.demoShift, 0, W, H);
+    this.composer.render(dt);
+  }
+  demoDirect(dt) {
+    if (!this.fading) {
+      if (this.state === 'ended') this.demoEndT += dt;
+      if ((this.state === 'ended' && this.demoEndT > 2.5) || this.elapsed > 55) this.demoNextMap();
+    }
+    this.demoClock += dt;
+    const g = this.rig.goal.follow;
+    if (this.demoClock > this.demoShotLen) {
+      this.demoClock = 0; this.demoShotLen = 9 + Math.random() * 5;
+      this.demoSide = -this.demoSide;
+      let i; do { i = Math.floor(Math.random() * this.animals.length); } while (i === this.focusIdx && this.animals.length > 1);
+      this.focusIdx = i;
+      g.dist = 14 + Math.random() * 5; g.pitch = (44 + Math.random() * 12) * DEG; g.yaw += (Math.random() - 0.5) * 1.4;
+    }
+    g.yaw += 0.06 * this.demoSide * dt;
+  }
+  demoNextMap() {
+    this.fading = true; this.canvas.classList.add('fade');
+    setTimeout(() => {
+      if (this.disposed) return;
+      this.newRound(false);                              // 'all built-in maps' rotation picks a different one
+      this.demoClock = 99; this.demoEndT = 0; this.fading = false; this.canvas.classList.remove('fade');
+      if (this.onMap) this.onMap(this.customMap);
+    }, 650);
+  }
+  disposeDemo() {
+    this.disposed = true;
+    window.removeEventListener('resize', this._onResize);
+    try {
+      for (const a of this.animals) a.dispose();
+      this.maze.disposeDecor();
+      this.maze.group.traverse(o => { if (o.material) o.material.dispose(); });
+      for (const g of this.maze.wallGeos) g.dispose();
+      this.maze.groundTex.dispose();
+      this.composer.dispose && this.composer.dispose();
+      this.renderer.dispose();
+      this.renderer.forceContextLoss();                  // give the GPU memory back before the real game starts
+    } catch { }
+    const old = this.canvas, fresh = old.cloneNode(false);   // a canvas whose context was lost cannot be reused: swap in a clean one
+    old.replaceWith(fresh);
+  }
+
   update(dt) {
     if (this.state !== 'playing') return;
     this.elapsed += dt;
@@ -7587,8 +7670,10 @@ class Game {
     this.updateHud();
   }
   frame(now) {
+    if (this.disposed) return;
     let dt = Math.min(0.05, Math.max(1e-4, (now - this.last) / 1000));
     this.last = now;
+    if (this.demo) { this.demoFrame(now, dt); requestAnimationFrame(this.frame); return; }
     this.update(dt);
     this.rig.update(dt);
     this.drawMindMap();
@@ -8468,6 +8553,56 @@ function initSetupScreen() {
   });
   refreshMapSelect();
 
+  // ---- live preview behind the card (see Game.demoFrame)
+  const DEMO_KEY = 'golden-bowl-preview-off';
+  const TIPS = [
+    '🐶 Dogs can smell the bowl from far away, but they hardly see.',
+    '🐷 The pig sees far down the corridors, but can barely smell.',
+    '🧠 Every animal remembers where it has been. The pig remembers most.',
+    '🤖 Each animal can be you, a simple bot, or an LLM agent.',
+    '🗺 Draw your own maze in the map editor and share it as a code.',
+    '🎥 In the game, press C to look through the animal’s eyes.',
+  ];
+  let demo = null, demoPref = true, tipTimer = 0, tipI = 0;
+  try { demoPref = localStorage.getItem(DEMO_KEY) !== 'off'; } catch { }
+  const demoPossible = () => !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) && window.innerWidth >= 960 && !/[?&]demo=0/.test(location.search);
+  const capText = (title, tip) => { $('demo-title').textContent = title; $('demo-tip').textContent = tip || ''; };
+  const showTip = () => { if (demo) { $('demo-tip').textContent = TIPS[tipI++ % TIPS.length]; } };
+  function stopDemo(forGood, why) {
+    clearInterval(tipTimer);
+    if (demo) { demo.disposeDemo(); demo = null; }
+    window.__demo = null;
+    $('bg').classList.add('hidden', 'fade'); $('setup').classList.remove('demo-on');
+    if (forGood) { $('demo-cap').classList.add('hidden'); return; }
+    capText(why || 'Live preview is off', '');
+    $('demo-toggle').textContent = '▶'; $('demo-toggle').title = 'Turn the live preview on';
+  }
+  function startDemo() {
+    if (demo || !demoPossible()) return;
+    try {
+      const cfg = ['dog', 'dog', 'dog', 'pig'].map((species, i) => ({ slot: i, species, name: ['Rex', 'Scout', 'Biscuit', 'Hamlet'][i], control: 'bot', llm: null }));
+      cfg.demo = true; cfg.mapRotation = true;
+      $('bg').classList.remove('hidden'); $('bg').classList.add('fade');
+      demo = new Game(cfg); window.__demo = demo;
+      demo.onSlow = () => stopDemo(false, 'Preview switched off (this computer is busy)');
+      demo.onMap = m => capText('🎬 Live preview · ' + m.icon + ' ' + m.name, null);
+      requestAnimationFrame(() => requestAnimationFrame(() => $('bg').classList.remove('fade')));
+      $('setup').classList.add('demo-on');
+      capText('🎬 Live preview · ' + demo.customMap.icon + ' ' + demo.customMap.name, TIPS[0]); tipI = 1;
+      tipTimer = setInterval(showTip, 7000);
+      $('demo-toggle').textContent = '⏸'; $('demo-toggle').title = 'Pause the live preview (saves battery)';
+    } catch (err) { console.warn('preview unavailable', err); stopDemo(true); }
+  }
+  if (demoPossible()) {
+    $('demo-cap').classList.remove('hidden');
+    $('demo-toggle').addEventListener('click', () => {
+      if (demo) { demoPref = false; stopDemo(false, 'Live preview paused'); } else { demoPref = true; startDemo(); }
+      try { localStorage.setItem(DEMO_KEY, demoPref ? 'on' : 'off'); } catch { }
+    });
+    if (demoPref) setTimeout(startDemo, 300); else stopDemo(false, 'Live preview paused');
+    window.addEventListener('resize', () => { if (demo && window.innerWidth < 900) stopDemo(false, 'Live preview paused (window too narrow)'); });
+  }
+
   $('start-btn').addEventListener('click', () => {
     const config = rows.map((row, i) => ({
       slot: i,
@@ -8494,6 +8629,7 @@ function initSetupScreen() {
     if (activeMap) { const a = analyzeMap(activeMap); if (a.errors.length) { $('setup-error').textContent = 'The selected map has a problem: ' + a.errors[0]; return; } config.customMap = activeMap; }
     persist();
     $('setup-error').textContent = '';
+    stopDemo(true);
     window.__game = new Game(config);
   });
 }
