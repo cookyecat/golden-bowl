@@ -123,6 +123,9 @@
   #hint{position:absolute;left:16px;bottom:16px;background:var(--panel);backdrop-filter:blur(6px);border:1px solid #2c3947;
     border-radius:10px;padding:8px 12px;font-size:12.5px;color:var(--sub);font-weight:600}
   #hint b{color:var(--ink)}
+  #crosshair{position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px 0 0 -5px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 4px #000a;pointer-events:none;opacity:.85}
+  #lock-tip{position:absolute;left:50%;top:76px;transform:translateX(-50%);background:var(--panel);backdrop-filter:blur(6px);border:1px solid #2c3947;
+    border-radius:999px;padding:7px 16px;font-size:13px;font-weight:700;color:var(--ink);pointer-events:none;white-space:nowrap}
 
   /* ---------- per-animal agent panels ---------- */
   #agent-panels{position:absolute;right:12px;top:56px;bottom:16px;width:min(360px,42vw);display:flex;flex-direction:column;gap:8px;pointer-events:none}
@@ -343,8 +346,10 @@
     <div id="mind-legend"><i class="lg-walk"></i>walked <i class="lg-seen"></i>seen <i class="lg-bowl"></i>bowl</div>
   </div>
   <div id="hint">
-    <span id="hint-move"><b>Arrow keys / WASD</b> move your animal (relative to the screen) · </span><b>Tab</b> / <b>1-4</b> switch animal · <b>C</b> camera · <b>drag</b> orbit · <b>wheel</b> zoom · <b>right-drag</b> pan · <b>Q/E</b> rotate · <b>V</b> reset · <b>N</b> mind map · <b>M</b> mute · <b>L</b> name tags
+    <span id="hint-move"><b>Arrow keys / WASD</b> move your animal (relative to the screen) · </span><b>Tab</b> / <b>1-4</b> switch animal · <b>C</b> camera · <b>drag</b> orbit (Eye view: <b>mouse</b> looks, FPS-style) · <b>wheel</b> zoom · <b>right-drag</b> pan · <b>Q/E</b> rotate · <b>V</b> reset · <b>N</b> mind map · <b>M</b> mute · <b>L</b> name tags
   </div>
+  <div id="crosshair" class="hidden"></div>
+  <div id="lock-tip" class="hidden">🖱 Click the view to look around with the mouse · <b>Esc</b> releases it</div>
   <div id="animal-labels"></div>
   <div id="agent-panels" class="hidden"></div>
 </div>
@@ -7043,11 +7048,12 @@ class CameraRig {
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       try { cv.setPointerCapture(e.pointerId); } catch { }
       this.drag = { pan: e.button === 1 || e.button === 2 || e.shiftKey };
+      if (this.mode === 'eye' && e.pointerType === 'mouse' && e.button === 0) this.lockMouse();   // FPS look: the mouse is captured
       if (this.pointers.size === 2) this.pinch = this.pointerSpread();
       cv.style.cursor = 'grabbing';
     });
     cv.addEventListener('pointermove', e => {
-      const p = this.pointers.get(e.pointerId); if (!p) return;
+      const p = this.pointers.get(e.pointerId); if (!p || this.locked) return;
       const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY;
       if (this.pointers.size >= 2) {
         const s = this.pointerSpread();
@@ -7059,13 +7065,33 @@ class CameraRig {
     const up = e => { this.pointers.delete(e.pointerId); if (!this.pointers.size) { this.drag = null; cv.style.cursor = ''; } this.pinch = 0; };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
     cv.addEventListener('wheel', e => { e.preventDefault(); this.zoomBy(Math.exp(clamp(e.deltaY, -120, 120) * 0.0012)); }, { passive: false });
-    cv.addEventListener('dblclick', () => this.reset());
+    cv.addEventListener('dblclick', () => { if (this.mode !== 'eye') this.reset(); });
+    // Pointer lock: plain mouse movement turns the view, like an FPS.
+    document.addEventListener('mousemove', e => { if (this.locked && this.mode === 'eye') this.look(e.movementX || 0, e.movementY || 0, 0.0024); });
+    document.addEventListener('pointerlockchange', () => this.updateEyeUi());
+  }
+  get locked() { return document.pointerLockElement === this.canvas; }
+  lockMouse() {
+    if (this.mode !== 'eye' || this.locked || this.game.state !== 'playing' || !this.canvas.requestPointerLock) return;
+    try { const r = this.canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { }); } catch { }
+  }
+  unlockMouse() { if (this.locked) { try { document.exitPointerLock(); } catch { } } }
+  updateEyeUi() {
+    const eye = this.mode === 'eye', locked = this.locked;
+    const ch = $('crosshair'), tip = $('lock-tip');
+    if (ch) ch.classList.toggle('hidden', !(eye && locked));
+    if (tip) tip.classList.toggle('hidden', !(eye && !locked && this.game.state === 'playing'));
   }
   pointerSpread() { const a = [...this.pointers.values()]; return a.length < 2 ? 0 : Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y); }
   orbit(dx, dy) {
     const g = this.goal[this.mode], L = this.limits[this.mode];
-    if (this.mode === 'eye') { g.yaw += dx * 0.005; g.pitch = clamp(g.pitch - dy * 0.005, L.pitch[0], L.pitch[1]); }   // drag the scene: look the other way
+    if (this.mode === 'eye') this.look(dx, dy, 0.005);     // touch / unlocked drag: finger right = look right, like an FPS
     else { g.yaw -= dx * 0.006; g.pitch = clamp(g.pitch + dy * 0.005, L.pitch[0], L.pitch[1]); }
+  }
+  // FPS look. Mouse right -> look right (yaw falls, see worldDir), mouse up -> look up (pitch falls; positive pitch = looking down).
+  look(dx, dy, sens) {
+    const g = this.goal.eye, L = this.limits.eye;
+    g.yaw -= dx * sens; g.pitch = clamp(g.pitch + dy * sens, L.pitch[0], L.pitch[1]);
   }
   pan(dx, dy) {
     if (this.mode !== 'overview') return;
@@ -7089,7 +7115,8 @@ class CameraRig {
   setMode(m) {
     if (!CAM_MODES.includes(m) || m === this.mode) return;
     this.mode = m;
-    if (m === 'eye') this.alignToFocus(); else this.goal[m].yaw = this.cur.yaw;   // keep "up on screen" stable across switches
+    if (m === 'eye') { this.alignToFocus(); this.lockMouse(); } else { this.goal[m].yaw = this.cur.yaw; this.unlockMouse(); }   // keep "up on screen" stable across switches
+    this.updateEyeUi();
     const b = $('cam-btn'); if (b) b.textContent = CAM_LABEL[m];
   }
   cycle() { this.setMode(CAM_MODES[(CAM_MODES.indexOf(this.mode) + 1) % CAM_MODES.length]); }
@@ -7103,8 +7130,11 @@ class CameraRig {
     let tx = g.px || 0, ty = 0, tz = g.pz || 0, lam = 6;
     if (this.mode !== 'overview' && focus) { tx = focus.x; tz = focus.z; ty = this.mode === 'eye' ? 0.55 : 0.3; lam = this.mode === 'eye' ? 40 : 7; }
     c.tx = damp(c.tx, tx, lam, dt); c.ty = damp(c.ty, ty, lam, dt); c.tz = damp(c.tz, tz, lam, dt);
-    c.yaw = dampAngle(c.yaw, g.yaw, 9, dt);
-    c.pitch = damp(c.pitch, g.pitch, 9, dt);
+    const turn = this.mode === 'eye' ? 32 : 9;      // first-person look follows the mouse almost 1:1
+    c.yaw = dampAngle(c.yaw, g.yaw, turn, dt);
+    c.pitch = damp(c.pitch, g.pitch, turn, dt);
+    if (this.locked && (this.mode !== 'eye' || this.game.state !== 'playing')) this.unlockMouse();
+    if (this._uiState !== this.game.state + this.mode + this.locked) { this._uiState = this.game.state + this.mode + this.locked; this.updateEyeUi(); }
     c.dist = damp(c.dist, g.dist, 6, dt);
     c.fov = damp(c.fov, g.fov, 6, dt);
     this.apply();
