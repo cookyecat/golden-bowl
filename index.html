@@ -24,6 +24,7 @@
   #demo-cap{position:fixed;left:14px;bottom:14px;z-index:60;display:flex;gap:8px;align-items:flex-start;max-width:min(250px,calc((100vw - 620px) / 2 - 8px));
     background:rgba(16,22,29,.72);backdrop-filter:blur(6px);border:1px solid #2c3947;border-radius:12px;padding:8px 10px;font-size:12.5px;line-height:1.4;color:var(--sub);font-weight:600}
   #demo-cap button{padding:3px 8px;font-size:12px;border-radius:8px;background:#26323f;color:var(--ink);flex:none}
+  body.editing #demo-cap{display:none}
   #demo-title{display:block;color:var(--ink);font-weight:800}
   #demo-tip:empty{display:none}
   button{font-family:inherit;cursor:pointer;border:none;border-radius:10px;padding:10px 16px;font-weight:800;
@@ -8073,11 +8074,11 @@ class MapEditor {
     this.map = cloneMap(map); this.onUse = onUse; this.undoStack = []; this.redoStack = [];
     $('ed-name').value = this.map.name || '';
     $('ed-msg').textContent = ''; $('ed-code-in').value = '';
-    this.root.classList.remove('hidden');
+    this.root.classList.remove('hidden'); document.body.classList.add('editing');
     this.layout(); this.refreshSaved(); this.refresh();
     this.root.scrollTop = 0;
   }
-  close() { this.root.classList.add('hidden'); }
+  close() { this.root.classList.add('hidden'); document.body.classList.remove('editing'); }
   isOpen() { return !this.root.classList.contains('hidden'); }
   layout() {
     const css = clamp(Math.floor(Math.min(window.innerWidth - 56, 620, window.innerHeight - 330) / ED_N) * ED_N, ED_N * 10, ED_N * 24);
@@ -8478,6 +8479,15 @@ function initSetupScreen() {
       card.copySel.disabled = Object.keys(card.copySources).length === 0;
     });
   };
+  // The Artifacts page blocks network requests to AI providers, so there the LLM option is switched off (see make_artifact.py).
+  if (window.GB_NO_LLM) {
+    rows.forEach(row => {
+      const sel = row.querySelector('.control-select'), o = [...sel.options].find(x => x.value === 'llm');
+      if (o) { if (sel.value === 'llm') sel.value = 'bot'; o.disabled = true; o.textContent = 'LLM Agent (download the game)'; }
+    });
+    const tag = document.querySelector('#setup-card .tagline');
+    if (tag) tag.append(document.createElement('br'), 'This online preview cannot reach AI providers, so LLM agents need the downloadable version.');
+  }
   rows.forEach((row, i) => {
     const sel = row.querySelector('.control-select');
     const apply = (userChange) => {
