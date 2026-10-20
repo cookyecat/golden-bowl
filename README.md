@@ -5,7 +5,7 @@
 **Three dogs and a pig search a maze for a golden bowl of food.**
 Play it yourself, watch simple bots race, or give each animal its own **LLM brain** and see which model finds the bowl first.
 
-[**▶ Play it in your browser**](https://YOUR-USERNAME.github.io/golden-bowl/) &nbsp;·&nbsp; no install, no account, one HTML file
+[**▶ Play it in your browser**](https://gold.starverse.chat/) &nbsp;·&nbsp; no install, no account, one HTML file
 
 ![Four bots racing across the Pillar Meadow map, seen from above](docs/images/race.gif)
 
@@ -179,13 +179,6 @@ There is nothing to build. Open `index.html` in a modern browser (Chrome recomme
 python3 -m http.server 8000
 # then open http://localhost:8000
 ```
-
-## Publish your own copy on GitHub Pages
-
-1. Create a new public repository and upload `index.html` (and this README, `docs/` and `cors-proxy.py`).
-2. **Settings → Pages → Build and deployment → Source: Deploy from a branch**, branch `main`, folder `/ (root)` → **Save**.
-3. After a minute your game is live at `https://YOUR-USERNAME.github.io/REPO-NAME/`.
-4. Optional: add a custom domain under **Settings → Pages → Custom domain** and enable **Enforce HTTPS**.
 
 ## Repository layout
 
