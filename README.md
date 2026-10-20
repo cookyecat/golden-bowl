@@ -11,8 +11,6 @@ Play it yourself, watch simple bots race, or give each animal its own **LLM brai
 
 </div>
 
-> Replace `YOUR-USERNAME` / `golden-bowl` in the link above with your own GitHub Pages address.
-
 ---
 
 ## What is this?
@@ -36,7 +34,7 @@ You can mix them freely, for example *you* against a bot, or Claude against GPT 
 
 ## Quick start
 
-1. Open the game (link above, or open `index.html` from this repo in Chrome).
+1. Open the game ([**link above**](https://gold.starverse.chat/), or open `index.html` from this repo in Chrome).
 2. For each animal pick **Human**, **Bot** or **LLM Agent**.
 3. Pick a map, or leave it on 🎲 *Random maze*.
 4. Press **Start**.
@@ -111,7 +109,7 @@ There are one-click **presets** (Anthropic, OpenAI, DeepSeek, OpenRouter, local 
 
 ### What does the model actually see?
 
-**Not the picture.** The model never receives the rendered first-person view or any screenshot. Everything is **text**, and deliberately limited to what that animal could sense:
+**Not the picture. But you can change codes to send picture** The model never receives the rendered first-person view or any screenshot. Everything is **text**, and deliberately limited to what that animal could sense:
 
 1. **A system prompt** with the rules: the goal, the coordinate system (`N` increases *y*, `E` increases *x*), how smell and memory work, and the animal's own memory capacity.
 2. **Three tools** it can call:
@@ -201,4 +199,4 @@ README.md         you are here
 
 Built with [three.js](https://threejs.org/) (MIT licensed). Game code, maps and artwork: see the repository owner.
 
-*Add a `LICENSE` file of your choice (for example MIT) before inviting contributions.*
+*LICENSE: MIT*
